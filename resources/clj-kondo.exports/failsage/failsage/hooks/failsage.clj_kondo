@@ -1,0 +1,17 @@
+(ns hooks.failsage
+  (:require [clj-kondo.hooks-api :as api]))
+
+(defn analyze-execute-macro
+  "analyze execute macro to support optional context binding"
+  [{:keys [:node]}]
+  (let [execute-args (rest (:children node))
+        [executor-or-policy context-binding body] (when (= 3 (count execute-args))
+                                                    execute-args)]
+    (if context-binding
+      {:node (api/list-node
+              (list
+               (api/token-node 'let)
+               (api/vector-node
+                (vector context-binding executor-or-policy))
+               body))}
+      {:node node})))

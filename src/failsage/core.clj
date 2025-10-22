@@ -4,30 +4,122 @@
    [failsage.impl :as impl]
    [futurama.core :refer [!<! async]])
   (:import
+   [clojure.lang IPersistentMap]
    [dev.failsafe
     AsyncExecution
     Bulkhead
+    BulkheadBuilder
     CircuitBreaker
+    CircuitBreakerBuilder
     ExecutionContext
+    Failsafe
     FailsafeExecutor
     Fallback
-    RateLimiter
-    RetryPolicy
-    Timeout]
-   [dev.failsafe
-    BulkheadBuilder
-    CircuitBreakerBuilder
     FallbackBuilder
+    Policy
+    RateLimiter
     RateLimiterBuilder
+    RetryPolicy
     RetryPolicyBuilder
+    Timeout
     TimeoutBuilder]
    [dev.failsafe.function CheckedPredicate]
-   [java.time Duration]))
+   [java.time Duration]
+   [java.util List]))
 
-(defn build-policy
-  "Builds and returns the Failsafe Policy instance from a builder."
-  [builder]
-  (impl/build-policy builder))
+(defprotocol IPolicyBuilder
+  "Protocol for building Failsafe policies."
+  (build-policy [this]
+    "Builds and returns the Failsafe Policy instance."))
+
+(defn policies
+  "Creates a Policy list with the provided policy arguments.
+
+  Docs: https://failsafe.dev/javadoc/core/dev/failsafe/Policies.html
+
+  Parameters:
+  - `policy-args`: The policy arguments to build the policy list.
+
+  Returns a list of policies."
+  ^List [& policy-args]
+  (->> (for [policy (flatten policy-args)
+             :when (some? policy)]
+         (cond
+           (instance? Policy policy)
+           policy
+
+           (satisfies? IPolicyBuilder policy)
+           (build-policy policy)
+
+           :else (throw (ex-info "Invalid policy type" {:policy policy}))))
+       vec))
+
+(defn executor
+  "Creates a FailsafeExecutor instance with the provided policies.
+
+  Docs: https://failsafe.dev/javadoc/core/dev/failsafe/FailsafeExecutor.html
+
+  Options:
+  - `:pool` (optional): An executor service to use for async executions.
+  If not provided, it will use the currently bound `futurama.core/*thread-pool*` or `:io` pool.
+  - `:policies` (optional): The policy or policies to use with the FailsafeExecutor.
+  If not provided, the executor will treat any exceptions as a failure without any additional error handling."
+  (^FailsafeExecutor []
+   (executor nil nil))
+  (^FailsafeExecutor [executor-or-policies]
+   (executor nil executor-or-policies))
+  (^FailsafeExecutor [pool executor-or-policies]
+   (let [pool (impl/get-pool pool)]
+     (if (instance? FailsafeExecutor executor-or-policies)
+       (.with ^FailsafeExecutor executor-or-policies pool)
+       (let [policies (policies executor-or-policies)]
+         (if (empty? policies)
+           (.with (Failsafe/none) pool)
+           (.with (Failsafe/with policies) pool)))))))
+
+(defmacro execute
+  "Executes the given function with the provided Failsafe executor or policy.
+
+  Docs: https://failsafe.dev/javadoc/core/dev/failsafe/FailsafeExecutor.html
+
+  Parameters:
+  - `executor-or-policy`: The FailsafeExecutor or Policies to use for execution.
+  - `context-binding`: the binding to use for the ExecutionContext context.
+  - `body`: the body of code to execute.
+
+  Returns the result or throws an exception."
+  ([body]
+   `(execute [] context# ~body))
+  ([executor-or-policy body]
+   `(execute ~executor-or-policy context# ~body))
+  ([executor-or-policy context-binding & body]
+   `(impl/execute-get (executor (impl/validate-not-stateful-map! ~executor-or-policy))
+                      (bound-fn [~(vary-meta context-binding assoc :tag ExecutionContext)]
+                        ~@body))))
+
+(defmacro execute-async
+  "Executes the given async function with the provided Failsafe executor or policy.
+
+  Docs: https://failsafe.dev/javadoc/core/dev/failsafe/FailsafeExecutor.html
+
+  Parameters:
+  - `executor-or-policy`: The FailsafeExecutor or Policies to use for async execution.
+  - `context-binding`: the binding to use for the AsyncExecution context.
+  - `body`: the body of code to execute.
+
+  Returns a future representing the result or exception."
+  ([body]
+   `(execute-async [] context# ~body))
+  ([executor-or-policy body]
+   `(execute-async ~executor-or-policy context# ~body))
+  ([executor-or-policy context-binding & body]
+   `(impl/execute-get-async (executor (impl/validate-not-stateful-map! ~executor-or-policy))
+                            (bound-fn [~(vary-meta context-binding assoc :tag AsyncExecution)]
+                              (async
+                               (try
+                                 (impl/record-async-success ~context-binding (!<! ~@body))
+                                 (catch Throwable ~'t
+                                   (impl/record-async-failure ~context-binding ~'t))))))))
 
 (defn bulkhead
   "A bulkhead allows you to restrict concurrent executions as a way of preventing system overload.
@@ -82,7 +174,7 @@
 
   A minimum number of executions must be performed in order for a state transition to occur:
   - Time based circuit breakers use a sliding window to aggregate execution results.
-  - The window is divided into 10 time slices, each representing 1/10th of the failure thresholding period`.
+  - The window is divided into 10 time slices, each representing 1/10th of the failure thresholding period.
   - As time progresses, statistics for old time slices are gradually discarded, which smoothes the calculation of success and failure rates.
 
   Base options:
@@ -236,14 +328,14 @@
 
   Options:
   - `:build` (optional): If true, builds and returns the Fallback instance. If false, returns the FallbackBuilder instance. Default is true.
-  - `:fallback-fn` (optional): A function that takes a single ExecutionAttemptedEvent argument, and returns a fallback result.
-  - `:fallback` (optional): A static fallback result to return when a failure occurs.
+  - `:result-fn` (optional): A function that takes a single ExecutionAttemptedEvent argument, and returns a fallback result.
+  - `:result` (optional): A static fallback result to return when a failure occurs.
   - `:on-success-fn` (optional): A function that takes a single ExecutionCompletedEvent argument, called when an execution completes successfully.
   - `:on-failure-fn` (optional): A function that takes a single ExecutionCompletedEvent argument, called when an execution completes with a failure.
-  - `:handle-exception` (optional): A class or collection of exception classes that should be considered failures by the circuit breaker.
-  - `:handle-exception-fn` (optional): A function that takes a single Throwable argument, and returns true if the exception should be considered a failure by the circuit breaker.
-  - `:handle-result` (optional): A static result that should be considered a failure by the circuit breaker.
-  - `:handle-result-fn` (optional): A function that takes a single result argument, and returns true if the result should be considered a failure by the circuit breaker."
+  - `:handle-exception` (optional): A class or collection of exception classes that should be considered failures by the fallback policy.
+  - `:handle-exception-fn` (optional): A function that takes a single Throwable argument, and returns true if the exception should be considered a failure by the fallback policy.
+  - `:handle-result` (optional): A static result that should be considered a failure by the fallback policy.
+  - `:handle-result-fn` (optional): A function that takes a single result argument, and returns true if the result should be considered a failure by the fallback policy."
   [{:keys [build
            result
            result-fn
@@ -337,7 +429,7 @@
   Docs: https://failsafe.dev/javadoc/core/dev/failsafe/RetryPolicy.html
 
   Options:
-  - `:build` (optional): If true, builds and returns the Bulkhead instance. If false, returns the RetryPolicyBuilder instance. Default is true.
+  - `:build` (optional): If true, builds and returns the RetryPolicy instance. If false, returns the RetryPolicyBuilder instance. Default is true.
   - `:backoff-delay-ms` (optional): Sets the `backoff-delay-ms` between retries.
   - `:backoff-max-delay-ms` (optional): Sets the maximum `backoff-max-delay-ms` between retries.
   - `:backoff-delay-factor` (optional): Sets the `backoff-delay-factor` to multiply consecutive delays by. Default is 2.0.
@@ -360,12 +452,10 @@
   - `:on-retry-scheduled-fn` (optional): A function that takes a single RetryScheduledEvent argument, called when an async retry has been scheduled.
   - `:on-success-fn` (optional): A function that takes a single ExecutionCompletedEvent argument, called when an execution completes successfully.
   - `:on-failure-fn` (optional): A function that takes a single ExecutionCompletedEvent argument, called when an execution completes with a failure.
-  - `:handle-exception` (optional): A class or collection of exception classes that should be considered failures by the circuit breaker.
-  - `:handle-exception-fn` (optional): A function that takes a single Throwable argument, and returns true if the exception should be considered a failure by the circuit breaker.
-  - `:handle-result` (optional): A static result that should be considered a failure by the circuit breaker.
-  - `:handle-result-fn` (optional): A function that takes a single result argument, and returns true if the result should be considered a failure by the circuit breaker.
-
-  Exceptions:"
+  - `:handle-exception` (optional): A class or collection of exception classes that should be considered failures by the retry policy.
+  - `:handle-exception-fn` (optional): A function that takes a single Throwable argument, and returns true if the exception should be considered a failure by the retry policy.
+  - `:handle-result` (optional): A static result that should be considered a failure by the retry policy.
+  - `:handle-result-fn` (optional): A function that takes a single result argument, and returns true if the result should be considered a failure by the retry policy."
   [{:keys [build
            backoff-delay-ms
            backoff-max-delay-ms
@@ -479,7 +569,7 @@
   - `:on-success-fn` (optional): A function that takes a single ExecutionCompletedEvent argument, called when an execution completes successfully.
   - `:on-failure-fn` (optional): A function that takes a single ExecutionCompletedEvent argument, called when an execution completes with a failure.
   - `:timeout-ms` (required): The timeout duration in milliseconds.
-  - `:interrupt` (optional): Configures the policy to interrupt an execution in addition to cancelling it when the timeout is exceeded.. Default is false."
+  - `:interrupt` (optional): Configures the policy to interrupt an execution in addition to cancelling it when the timeout is exceeded. Default is false."
   [{:keys [build
            timeout-ms
            interrupt
@@ -500,63 +590,41 @@
       (build-policy builder)
       builder)))
 
-(defn executor
-  "Creates a FailsafeExecutor instance with the provided policies.
+(extend-protocol IPolicyBuilder
+  IPersistentMap
+  (build-policy [this]
+    (if-let [type (:type this)]
+      (let [policy-map (merge this {:build true})]
+        (case type
+          :bulkhead (bulkhead policy-map)
+          :circuit-breaker (circuit-breaker policy-map)
+          :fallback (fallback policy-map)
+          :rate-limiter (rate-limiter policy-map)
+          :retry (retry policy-map)
+          :timeout (timeout policy-map)
+          (throw (IllegalArgumentException. (str "Unknown policy type: " type)))))
+      (throw (IllegalArgumentException. "Policy map must contain a :type key"))))
 
-  Docs: https://failsafe.dev/javadoc/core/dev/failsafe/FailsafeExecutor.html
+  BulkheadBuilder
+  (build-policy [this]
+    (.build this))
 
-  Options:
-  - `:pool` (optional): An executor service to use for async executions.
-  If not provided, it will use the currently bound `futurama.core/*thread-pool*` or `:io` pool.
-  - `:policies`, `:policy-args` (optional): The policy or policies to use with the FailsafeExecutor.
-  If not provided, the executor will treat any exceptions as a failure without any additional error handling."
-  (^FailsafeExecutor []
-   (impl/->executor nil nil))
-  (^FailsafeExecutor [policies]
-   (impl/->executor nil policies))
-  (^FailsafeExecutor [pool policies]
-   (impl/->executor pool policies)))
+  CircuitBreakerBuilder
+  (build-policy [this]
+    (.build this))
 
-(defmacro execute
-  "Executes the given function with the provided Failsafe executor or policy.
+  FallbackBuilder
+  (build-policy [this]
+    (.build this))
 
-  Docs: https://failsafe.dev/javadoc/core/dev/failsafe/FailsafeExecutor.html
+  RateLimiterBuilder
+  (build-policy [this]
+    (.build this))
 
-  Parameters:
-  - `executor-or-policy`: The FailsafeExecutor or Policies to use for execution.
-  - `context-binding`: the binding to use for the ExecutionContext context.
-  - `body`: the body of code to execute.
+  RetryPolicyBuilder
+  (build-policy [this]
+    (.build this))
 
-  Returns the result or throws an exception."
-  ([body]
-   `(execute [] context# ~body))
-  ([executor-or-policy body]
-   `(execute ~executor-or-policy context# ~body))
-  ([executor-or-policy context-binding body]
-   `(impl/execute-get ~executor-or-policy
-                      (bound-fn [~(vary-meta context-binding assoc :tag ExecutionContext)]
-                        ~body))))
-
-(defmacro execute-async
-  "Executes the given async function with the provided Failsafe executor or policy.
-
-  Docs: https://failsafe.dev/javadoc/core/dev/failsafe/FailsafeExecutor.html
-
-  Parameters:
-  - `executor-or-policy`: The FailsafeExecutor or Policies to use for async execution.
-  - `context-binding`: the binding to use for the AsyncExecution context.
-  - `body`: the body of code to execute.
-
-  Returns a future representing the result or exception."
-  ([body]
-   `(execute-async [] context# ~body))
-  ([executor-or-policy body]
-   `(execute-async ~executor-or-policy context# ~body))
-  ([executor-or-policy context-binding body]
-   `(impl/execute-get-async ~executor-or-policy
-                            (bound-fn [~context-binding]
-                              (async
-                               (try
-                                 (impl/record-async-success ~context-binding (!<! ~body))
-                                 (catch Throwable ~'t
-                                   (impl/record-async-failure ~context-binding ~'t))))))))
+  TimeoutBuilder
+  (build-policy [this]
+    (.build this)))

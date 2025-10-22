@@ -5,11 +5,11 @@
   "analyze execute macro to support optional context binding"
   [{:keys [:node]}]
   (let [execute-args (rest (:children node))
-        [executor-or-policy context-binding body] (when (= 3 (count execute-args))
-                                                    execute-args)]
+        [executor-or-policy context-binding & body] (when (>= (count execute-args) 3)
+                                                      execute-args)]
     (if context-binding
       {:node (api/list-node
-              (list
+              (list*
                (api/token-node 'let)
                (api/vector-node
                 (vector context-binding executor-or-policy))

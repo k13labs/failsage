@@ -5,9 +5,9 @@
   <groupId>com.github.k13labs</groupId>
   <artifactId>failsage</artifactId>
   <name>failsage</name>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
   <scm>
-    <tag>0.1.0</tag>
+    <tag>0.2.0</tag>
     <url>https://github.com/k13labs/failsage</url>
     <connection>scm:git:git://github.com/k13labs/failsage.git</connection>
     <developerConnection>scm:git:ssh://git@github.com/k13labs/failsage.git</developerConnection>

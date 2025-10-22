@@ -1,68 +1,15 @@
 (ns failsage.impl-test
   (:require
    [clojure.test :refer [deftest is testing]]
+   [failsage.core]
    [failsage.impl :as impl]
    [futurama.core :as f])
   (:import
    [dev.failsafe
-    Bulkhead
-    CircuitBreaker
     ExecutionContext
     Failsafe
-    Fallback
-    Policy
-    RateLimiter
-    RetryPolicy
-    Timeout]
-   [java.time Duration]
+    RetryPolicy]
    [java.util.concurrent ExecutorService]))
-
-;; IPolicyBuilder Protocol Tests
-
-(deftest test-build-policy-bulkhead-builder
-  (testing "build-policy builds a Bulkhead from BulkheadBuilder"
-    (let [builder (-> (Bulkhead/builder 5)
-                      (.withMaxWaitTime (Duration/ofMillis 100)))
-          policy (impl/build-policy builder)]
-      (is (instance? Bulkhead policy))
-      (is (instance? Policy policy)))))
-
-(deftest test-build-policy-circuit-breaker-builder
-  (testing "build-policy builds a CircuitBreaker from CircuitBreakerBuilder"
-    (let [builder (-> (CircuitBreaker/builder)
-                      (.withDelay (Duration/ofMillis 100)))
-          policy (impl/build-policy builder)]
-      (is (instance? CircuitBreaker policy))
-      (is (instance? Policy policy)))))
-
-(deftest test-build-policy-fallback-builder
-  (testing "build-policy builds a Fallback from FallbackBuilder"
-    (let [builder (Fallback/builder "default-value")
-          policy (impl/build-policy builder)]
-      (is (instance? Fallback policy))
-      (is (instance? Policy policy)))))
-
-(deftest test-build-policy-rate-limiter-builder
-  (testing "build-policy builds a RateLimiter from RateLimiterBuilder"
-    (let [builder (RateLimiter/smoothBuilder 10 (Duration/ofSeconds 1))
-          policy (impl/build-policy builder)]
-      (is (instance? RateLimiter policy))
-      (is (instance? Policy policy)))))
-
-(deftest test-build-policy-retry-policy-builder
-  (testing "build-policy builds a RetryPolicy from RetryPolicyBuilder"
-    (let [builder (-> (RetryPolicy/builder)
-                      (.withMaxRetries 3))
-          policy (impl/build-policy builder)]
-      (is (instance? RetryPolicy policy))
-      (is (instance? Policy policy)))))
-
-(deftest test-build-policy-timeout-builder
-  (testing "build-policy builds a Timeout from TimeoutBuilder"
-    (let [builder (Timeout/builder (Duration/ofSeconds 5))
-          policy (impl/build-policy builder)]
-      (is (instance? Timeout policy))
-      (is (instance? Policy policy)))))
 
 ;; EventListener Converter Tests
 
@@ -203,62 +150,6 @@
       (let [pool (impl/get-pool nil)]
         (is (instance? ExecutorService pool))))))
 
-;; Policy List Tests
-
-(deftest test-get-policy-list-with-single-policy
-  (testing "get-policy-list handles a single policy"
-    (let [policy (.build (RetryPolicy/builder))
-          result (impl/get-policy-list policy)]
-      (is (= 1 (count result)))
-      (is (instance? Policy (first result))))))
-
-(deftest test-get-policy-list-with-multiple-policies
-  (testing "get-policy-list handles multiple policies"
-    (let [policy1 (.build (RetryPolicy/builder))
-          policy2 (.build (Timeout/builder (Duration/ofSeconds 5)))
-          result (impl/get-policy-list policy1 policy2)]
-      (is (= 2 (count result)))
-      (is (every? #(instance? Policy %) result)))))
-
-(deftest test-get-policy-list-with-builder
-  (testing "get-policy-list builds policies from builders"
-    (let [builder (RetryPolicy/builder)
-          result (impl/get-policy-list builder)]
-      (is (= 1 (count result)))
-      (is (instance? RetryPolicy (first result))))))
-
-(deftest test-get-policy-list-with-mixed-types
-  (testing "get-policy-list handles mixed policies and builders"
-    (let [policy (.build (RetryPolicy/builder))
-          builder (Timeout/builder (Duration/ofSeconds 5))
-          result (impl/get-policy-list policy builder)]
-      (is (= 2 (count result)))
-      (is (instance? RetryPolicy (first result)))
-      (is (instance? Timeout (second result))))))
-
-(deftest test-get-policy-list-filters-nil
-  (testing "get-policy-list filters out nil values"
-    (let [policy (.build (RetryPolicy/builder))
-          result (impl/get-policy-list policy nil nil)]
-      (is (= 1 (count result))))))
-
-(deftest test-get-policy-list-flattens-nested
-  (testing "get-policy-list flattens nested collections"
-    (let [policy1 (.build (RetryPolicy/builder))
-          policy2 (.build (Timeout/builder (Duration/ofSeconds 5)))
-          result (impl/get-policy-list [policy1 policy2])]
-      (is (= 2 (count result))))))
-
-(deftest test-get-policy-list-empty
-  (testing "get-policy-list handles empty input"
-    (let [result (impl/get-policy-list)]
-      (is (empty? result)))))
-
-(deftest test-get-policy-list-invalid-type
-  (testing "get-policy-list throws on invalid policy type"
-    (is (thrown-with-msg? Exception #"Invalid policy type"
-                          (impl/get-policy-list "not-a-policy")))))
-
 ;; Execute Tests
 
 (deftest test-execute-get-basic
@@ -299,48 +190,6 @@
                                        "success")))]
       (is (= "success" result))
       (is (= 2 @counter)))))
-
-;; ->executor Tests
-
-(deftest test-executor-creation-no-args
-  (testing "->executor creates an executor with no arguments"
-    (let [executor (impl/->executor)]
-      (is (some? executor))
-      (is (instance? dev.failsafe.FailsafeExecutor executor)))))
-
-(deftest test-executor-creation-with-policies
-  (testing "->executor creates an executor with policies"
-    (let [retry-policy (.build (RetryPolicy/builder))
-          executor (impl/->executor [retry-policy])]
-      (is (some? executor))
-      (is (instance? dev.failsafe.FailsafeExecutor executor)))))
-
-(deftest test-executor-creation-with-pool-and-policies
-  (testing "->executor creates an executor with pool and policies"
-    (let [retry-policy (.build (RetryPolicy/builder))
-          executor (impl/->executor :io [retry-policy])]
-      (is (some? executor))
-      (is (instance? dev.failsafe.FailsafeExecutor executor)))))
-
-(deftest test-executor-creation-from-executor
-  (testing "->executor accepts a FailsafeExecutor and returns a new one with pool"
-    (let [base-executor (Failsafe/none)
-          executor (impl/->executor :io base-executor)]
-      (is (some? executor))
-      (is (instance? dev.failsafe.FailsafeExecutor executor)))))
-
-(deftest test-executor-creation-with-empty-policies
-  (testing "->executor with empty policies uses Failsafe.none"
-    (let [executor (impl/->executor [])]
-      (is (some? executor))
-      (is (instance? dev.failsafe.FailsafeExecutor executor)))))
-
-(deftest test-executor-creation-with-single-policy
-  (testing "->executor with single policy (not in collection)"
-    (let [retry-policy (.build (RetryPolicy/builder))
-          executor (impl/->executor retry-policy)]
-      (is (some? executor))
-      (is (instance? dev.failsafe.FailsafeExecutor executor)))))
 
 ;; record-async-success and record-async-failure Tests
 
@@ -420,7 +269,7 @@
           result (impl/execute-get-async executor
                                          (fn [ctx]
                                            (f/async
-                                            (impl/record-async-success ctx 42))))]
+                                             (impl/record-async-success ctx 42))))]
       (is (= 42 @result)))))
 
 (deftest test-execute-get-async-with-exception
@@ -429,10 +278,10 @@
           result (impl/execute-get-async executor
                                          (fn [ctx]
                                            (f/async
-                                            (try
-                                              (throw (ex-info "async error" {}))
-                                              (catch Throwable t
-                                                (impl/record-async-failure ctx t))))))]
+                                             (try
+                                               (throw (ex-info "async error" {}))
+                                               (catch Throwable t
+                                                 (impl/record-async-failure ctx t))))))]
       (is (thrown-with-msg? Exception #"async error"
                             @result)))))
 
@@ -444,7 +293,7 @@
                                          (fn [ctx]
                                            (reset! received-context ctx)
                                            (f/async
-                                            (impl/record-async-success ctx 42))))]
+                                             (impl/record-async-success ctx 42))))]
       (is (= 42 @result))
       (is (some? @received-context))
       (is (instance? dev.failsafe.AsyncExecution @received-context)))))

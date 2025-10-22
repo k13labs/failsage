@@ -1,56 +1,17 @@
-(ns failsage.impl
+(ns ^:no-doc failsage.impl
   (:require
    [futurama.core :as f])
   (:import
    [dev.failsafe
     AsyncExecution
-    BulkheadBuilder
-    CircuitBreakerBuilder
-    Failsafe
-    FailsafeExecutor
-    FallbackBuilder
-    Policy
-    RateLimiterBuilder
-    RetryPolicyBuilder
-    TimeoutBuilder]
+    FailsafeExecutor]
    [dev.failsafe.event EventListener]
    [dev.failsafe.function
     AsyncRunnable
     CheckedFunction
     CheckedPredicate
     ContextualSupplier]
-   [java.util List]
    [java.util.concurrent ExecutorService]))
-
-(defprotocol IPolicyBuilder
-  "Protocol for building Failsafe policies."
-  (build-policy [this]
-    "Builds and returns the Failsafe Policy instance."))
-
-(extend-protocol IPolicyBuilder
-  BulkheadBuilder
-  (build-policy [this]
-    (.build this))
-
-  CircuitBreakerBuilder
-  (build-policy [this]
-    (.build this))
-
-  FallbackBuilder
-  (build-policy [this]
-    (.build this))
-
-  RateLimiterBuilder
-  (build-policy [this]
-    (.build this))
-
-  RetryPolicyBuilder
-  (build-policy [this]
-    (.build this))
-
-  TimeoutBuilder
-  (build-policy [this]
-    (.build this)))
 
 (deftype FailsafeEventListener [f]
   EventListener
@@ -112,22 +73,6 @@
     (f/get-pool pool)
     (or pool f/*thread-pool* (f/get-pool :io))))
 
-(defn get-policy-list
-  "Returns a Failsafe-compatible sequence of policies."
-  ^List
-  [& policy-args]
-  (->> (for [policy (flatten policy-args)
-             :when (some? policy)]
-         (cond
-           (instance? Policy policy)
-           policy
-
-           (satisfies? IPolicyBuilder policy)
-           (build-policy policy)
-
-           :else (throw (ex-info "Invalid policy type" {:policy policy}))))
-       vec))
-
 (defn record-async-success
   "Records the result of an execution in the given ExecutionContext."
   [^AsyncExecution context ^Object result]
@@ -138,31 +83,32 @@
   [^AsyncExecution context ^Throwable error]
   (.recordException context error))
 
-(defn ->executor
-  "Creates a FailsafeExecutor with the given thread pool and policies.
-  If no policies are provided, uses Failsafe.none()
-  If no pool is provided, uses a default thread pool."
-  (^FailsafeExecutor []
-   (->executor nil nil))
-  (^FailsafeExecutor [executor-or-policies]
-   (->executor nil executor-or-policies))
-  (^FailsafeExecutor [pool executor-or-policies]
-   (let [pool (get-pool pool)]
-     (if (instance? FailsafeExecutor executor-or-policies)
-       (.with ^FailsafeExecutor executor-or-policies pool)
-       (let [policies (get-policy-list executor-or-policies)]
-         (if (empty? policies)
-           (.with (Failsafe/none) pool)
-           (.with (Failsafe/with policies) pool)))))))
-
 (defn execute-get
   "Executes the given CheckedSupplier using the Failsafe executor."
-  [executor-or-policies execute-fn]
-  (.get (->executor executor-or-policies)
-        (->contextual-supplier execute-fn)))
+  [^FailsafeExecutor executor execute-fn]
+  (.get executor (->contextual-supplier execute-fn)))
 
 (defn execute-get-async
   "Executes the given CheckedSupplier using the Failsafe executor."
-  [executor-or-policies execute-fn]
-  (.getAsyncExecution (->executor executor-or-policies)
-                      (->async-runnable execute-fn)))
+  [^FailsafeExecutor executor execute-fn]
+  (.getAsyncExecution executor (->async-runnable execute-fn)))
+
+(defn- check-stateful-map!
+  "Checks if a single policy is a stateful map and throws if so."
+  [policy]
+  (when (and (map? policy)
+             (#{:circuit-breaker :rate-limiter :bulkhead} (:type policy)))
+    (throw (ex-info "Cannot execute with stateful policy map directly"
+                    {:policy-map policy
+                     :policy-type (:type policy)
+                     :stateful-types #{:circuit-breaker :rate-limiter :bulkhead}}))))
+
+(defn validate-not-stateful-map!
+  "Validates that executor-or-policy is not a stateful policy map.
+   Returns the input unchanged if valid, throws if invalid."
+  [executor-or-policy]
+  (if (sequential? executor-or-policy)
+    (doseq [policy (flatten executor-or-policy)]
+      (check-stateful-map! policy))
+    (check-stateful-map! executor-or-policy))
+  executor-or-policy)

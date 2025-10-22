@@ -17,6 +17,7 @@ Rather than reinventing the resilience patterns, Failsage wisely wraps Failsafe 
 - **Idiomatic Clojure API**: Keyword arguments, immutable data structures, and functional style
 - **Async Support**: Seamless async execution integration via [futurama](https://github.com/k13labs/futurama), including channels/futures/promises/deferreds.
 - **Unified Interface**: Consistent API for both synchronous and asynchronous code paths
+- **Data-Driven Policies**: Define policies as plain Clojure maps for configuration-driven setups
 
 Failsage supports all core Failsafe policies:
 - **Retry**: Automatic retry with configurable backoff strategies
@@ -137,6 +138,98 @@ For detailed information on each policy's behavior and configuration options, se
   (process-task task))
 ```
 
+## Policy Maps
+
+Policies can also be defined using plain Clojure maps with a `:type` key. This is useful for configuration-driven setups or when you want to serialize/deserialize policy definitions:
+
+```clj
+;; Define policies as maps
+(def retry-map {:type :retry
+                :max-retries 3
+                :delay-ms 100})
+
+(def circuit-breaker-map {:type :circuit-breaker
+                          :delay-ms 60000
+                          :failure-threshold 5})
+
+(def fallback-map {:type :fallback
+                   :result {:status :degraded}})
+
+;; IMPORTANT: Stateful policies (circuit breakers, rate limiters, bulkheads) maintain
+;; state across executions. Using their maps directly with execute/execute-async will
+;; throw an exception to prevent accidentally losing state.
+
+;; ❌ THROWS EXCEPTION - stateful policy map used directly
+(fs/execute circuit-breaker-map (api-call-1))
+;; => ExceptionInfo: Cannot execute with stateful policy map directly
+
+;; ✅ CORRECT - create executor once, reuse it
+(def executor (fs/executor circuit-breaker-map))
+(fs/execute executor (api-call-1))
+(fs/execute executor (api-call-2))
+
+;; ✅ ALSO CORRECT - use policies function
+(def policy-list (fs/policies circuit-breaker-map))
+(fs/execute policy-list (api-call-1))
+(fs/execute policy-list (api-call-2))
+
+;; Stateless policies (retry, timeout, fallback) can be used directly as maps
+(fs/execute retry-map
+  (call-unreliable-service))
+```
+
+All policy types support the map format:
+
+```clj
+;; Retry
+{:type :retry :max-retries 3 :backoff-delay-ms 100 :backoff-max-delay-ms 5000}
+
+;; Circuit Breaker
+{:type :circuit-breaker :delay-ms 60000 :failure-threshold 5}
+
+;; Fallback
+{:type :fallback :result "default-value"}
+{:type :fallback :result-fn (fn [event] "computed-value")}
+
+;; Timeout
+{:type :timeout :timeout-ms 5000 :interrupt true}
+
+;; Rate Limiter
+{:type :rate-limiter :max-executions 100 :period-ms 1000 :burst true}
+
+;; Bulkhead
+{:type :bulkhead :max-concurrency 10 :max-wait-time-ms 1000}
+```
+
+Policy maps work seamlessly with all execution modes:
+
+```clj
+;; With executor (executor is created once and can be reused)
+(def executor (fs/executor {:type :retry :max-retries 3}))
+(fs/execute executor (operation-1))
+(fs/execute executor (operation-2))
+
+;; Direct with execute (only works for stateless policies like fallback, retry, timeout)
+(fs/execute {:type :fallback :result :default}
+  (risky-operation))
+
+;; With execute-async (only works for stateless policies)
+(fs/execute-async {:type :retry :max-retries 3}
+  (f/async (async-operation)))
+
+;; Stateful policy maps throw exceptions when used directly
+;; (fs/execute {:type :circuit-breaker :failure-threshold 5} (call))
+;; => ExceptionInfo: Cannot execute with stateful policy map directly
+
+;; Mix maps with regular policies
+(def retry-map {:type :retry :max-retries 3})
+(def fallback-policy (fs/fallback {:result :default}))
+;; Build executor once with both policies
+(def mixed-executor (fs/executor [fallback-policy retry-map]))
+(fs/execute mixed-executor (operation-1))
+(fs/execute mixed-executor (operation-2))
+```
+
 ## Policy Composition
 
 Policies can be composed together. They are applied in order from innermost to outermost:
@@ -178,6 +271,47 @@ Policies can be composed together. They are applied in order from innermost to o
 
 ;; Limit concurrency, break on failures, degrade gracefully
 (def executor (fs/executor [fallback cb bulkhead]))
+```
+
+**Configuration-driven with Policy Maps**: Load policies from config
+```clj
+;; Load from config file/env
+(def policy-config
+  [{:type :fallback :result {:status :degraded}}
+   {:type :circuit-breaker :failure-threshold 10 :delay-ms 30000}
+   {:type :retry :max-retries 3 :delay-ms 100}])
+
+;; Build executor once from map config - policies are built automatically
+(def executor (fs/executor policy-config))
+
+;; Reuse the executor for multiple calls - circuit breaker state is maintained
+(fs/execute executor (api-call-1))
+(fs/execute executor (api-call-2))
+(fs/execute executor (api-call-3))
+```
+
+**Creating Reusable Policy Lists**: Use `policies` to build policy lists independently
+```clj
+;; Create a reusable policy list - policies are built from maps
+;; Note: the policies function builds all policies immediately
+(def standard-policies
+  (fs/policies
+    (fs/fallback {:result {:status :degraded}})
+    {:type :circuit-breaker :failure-threshold 5 :delay-ms 30000}
+    (fs/retry {:max-retries 3})))
+
+;; Create executors with the same policy list
+;; Each executor gets the SAME policy instances (e.g., same circuit breaker)
+(def executor-1 (fs/executor standard-policies))
+(def executor-2 (fs/executor :io standard-policies))
+
+;; Both executors share the same circuit breaker state
+(fs/execute executor-1 (api-call))
+(fs/execute executor-2 (api-call))
+
+;; Or use directly with execute (creates a new executor each time)
+;; Note: this still reuses the same policy instances from standard-policies
+(fs/execute standard-policies (api-call))
 ```
 
 ## Asynchronous Execution

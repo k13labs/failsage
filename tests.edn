@@ -1,10 +1,12 @@
-#kaocha/v1 {:capture-output?                 true
+#kaocha/v1 {:capture-output?                 false
             :kaocha/fail-fast?               false
             :plugins                         [:kaocha.plugin/profiling
+                                              :kaocha.plugin/gc-profiling
                                               :kaocha.plugin/print-invocations
-                                              :preloads]
-            :tests                           [{:id        :unit
-                                               :kaocha/fail-fast?               false
+                                              :kaocha.plugin/junit-xml]
+            :kaocha.plugin.junit-xml/target-file "target/junit.xml"
+            :kaocha.plugin.junit-xml/add-location-metadata? true
+            :tests                           [{:id                              :unit
                                                :kaocha/source-paths             ["src"]
                                                :kaocha/test-paths               ["test"]
                                                :ns-patterns                     [".*"]}]}

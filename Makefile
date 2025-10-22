@@ -1,24 +1,19 @@
 .PHONY: repl test clean deploy install format-check format-fix
 
 TEST_CLOJURE_ALIAS ?= clojure-1.12
-TEST_CORE_ASYNC_ALIAS ?= core.async-1.8
 
 REPL_CLOJURE_ALIAS ?= clojure-1.12
-REPL_CORE_ASYNC_ALIAS ?= core.async-1.8
 
 SHELL := /bin/bash
-JAVA_OPTS ?= -Dfailsage.executor-factory=clojure.core.async.impl.dispatch/executor-for
-
-export _JAVA_OPTIONS := $(JAVA_OPTS)
 
 env:
 	env
 
 repl:
-	clojure -M:$(REPL_CLOJURE_ALIAS):$(REPL_CORE_ASYNC_ALIAS):dev:test:app:repl
+	clojure -M:$(REPL_CLOJURE_ALIAS):dev:test:app:repl
 
 test:
-	clojure -M:$(TEST_CLOJURE_ALIAS):$(TEST_CORE_ASYNC_ALIAS):dev:test:app:runner \
+	clojure -M:$(TEST_CLOJURE_ALIAS):dev:test:app:runner \
 		--focus :unit --reporter kaocha.report/documentation --no-capture-output
 
 clean:

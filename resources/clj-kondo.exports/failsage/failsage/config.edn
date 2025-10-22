@@ -1,1 +1,5 @@
-{}
+{:hooks {:analyze-call {failsage.core/execute
+                        hooks.failsage/analyze-execute-macro
+
+                        failsage.core/execute-async
+                        hooks.failsage/analyze-execute-macro}}}

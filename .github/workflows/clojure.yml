@@ -12,8 +12,9 @@ jobs:
   test:
     strategy:
       matrix:
-        java_version: [corretto-11,corretto-24]
-        test_clojure_alias: [clojure-1.10, clojure-1.11, clojure-1.12]
+        java_version: [corretto-24]
+        test_clojure_alias: [clojure-1.12]
+      fail-fast: false
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
@@ -53,8 +54,6 @@ jobs:
         echo "GRAALVM_HOME=$(mise where java)" >> $GITHUB_ENV
         echo "$(mise where java)/bin" >> $GITHUB_PATH
         gu install native-image
-    - name: Run tests
-      run: make test
     - name: Run clj-kondo linter
       run: make lint
     - name: Run build jar

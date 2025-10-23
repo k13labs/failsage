@@ -2,16 +2,24 @@
   (:require
    [futurama.core :as f])
   (:import
-   [dev.failsafe
-    AsyncExecution
-    FailsafeExecutor]
+   [dev.failsafe ExecutionContext FailsafeExecutor]
    [dev.failsafe.event EventListener]
    [dev.failsafe.function
-    AsyncRunnable
     CheckedFunction
     CheckedPredicate
+    CheckedRunnable
     ContextualSupplier]
    [java.util.concurrent ExecutorService]))
+
+(deftype FailsafeCheckedRunnable [f]
+  CheckedRunnable
+  (run [_]
+    (f)))
+
+(defn ->checked-runnable
+  "Converts a Clojure function to a Failsafe CheckedRunnable."
+  ^CheckedRunnable [f]
+  (FailsafeCheckedRunnable. f))
 
 (deftype FailsafeEventListener [f]
   EventListener
@@ -45,16 +53,6 @@
   ^CheckedPredicate [f]
   (FailsafeCheckedPredicate. f))
 
-(deftype FailsafeAsyncRunnable [f]
-  AsyncRunnable
-  (run [_ execution]
-    (f execution)))
-
-(defn ->async-runnable
-  "Converts a Clojure function to a Failsafe AsyncRunnable."
-  ^AsyncRunnable [f]
-  (FailsafeAsyncRunnable. f))
-
 (deftype FailsafeContextualSupplier [f]
   ContextualSupplier
   (get [_ context]
@@ -73,16 +71,6 @@
     (f/get-pool pool)
     (or pool f/*thread-pool* (f/get-pool :io))))
 
-(defn record-async-success
-  "Records the result of an execution in the given ExecutionContext."
-  [^AsyncExecution context ^Object result]
-  (.recordResult context result))
-
-(defn record-async-failure
-  "Records the error of an execution in the given ExecutionContext."
-  [^AsyncExecution context ^Throwable error]
-  (.recordException context error))
-
 (defn execute-get
   "Executes the given CheckedSupplier using the Failsafe executor."
   [^FailsafeExecutor executor execute-fn]
@@ -91,7 +79,7 @@
 (defn execute-get-async
   "Executes the given CheckedSupplier using the Failsafe executor."
   [^FailsafeExecutor executor execute-fn]
-  (.getAsyncExecution executor (->async-runnable execute-fn)))
+  (.getAsync executor (->contextual-supplier execute-fn)))
 
 (defn- check-stateful-map!
   "Checks if a single policy is a stateful map and throws if so."
@@ -102,6 +90,13 @@
                     {:policy-map policy
                      :policy-type (:type policy)
                      :stateful-types #{:circuit-breaker :rate-limiter :bulkhead}}))))
+
+(defn on-cancel-propagate!
+  "Creates a CheckedRunnable that invokes the given handler function when called."
+  [^ExecutionContext context async-result]
+  (.onCancel context (->checked-runnable
+                      (fn []
+                        (f/async-cancel! async-result)))))
 
 (defn validate-not-stateful-map!
   "Validates that executor-or-policy is not a stateful policy map.

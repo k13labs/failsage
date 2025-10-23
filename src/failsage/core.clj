@@ -2,11 +2,10 @@
   "Defines failsafe policies for handling failures, retries, etc."
   (:require
    [failsage.impl :as impl]
-   [futurama.core :refer [!<! async]])
+   [futurama.core :refer [!<!! async-cancel!]])
   (:import
    [clojure.lang IPersistentMap]
    [dev.failsafe
-    AsyncExecution
     Bulkhead
     BulkheadBuilder
     CircuitBreaker
@@ -68,10 +67,12 @@
    (executor nil nil))
   (^FailsafeExecutor [executor-or-policies]
    (executor nil executor-or-policies))
-  (^FailsafeExecutor [pool executor-or-policies]
-   (let [pool (impl/get-pool pool)]
+  (^FailsafeExecutor [executor-pool executor-or-policies]
+   (let [pool (impl/get-pool executor-pool)]
      (if (instance? FailsafeExecutor executor-or-policies)
-       (.with ^FailsafeExecutor executor-or-policies pool)
+       (if executor-pool
+         (.with ^FailsafeExecutor executor-or-policies pool)
+         executor-or-policies)
        (let [policies (policies executor-or-policies)]
          (if (empty? policies)
            (.with (Failsafe/none) pool)
@@ -114,12 +115,14 @@
    `(execute-async ~executor-or-policy context# ~body))
   ([executor-or-policy context-binding & body]
    `(impl/execute-get-async (executor (impl/validate-not-stateful-map! ~executor-or-policy))
-                            (bound-fn [~(vary-meta context-binding assoc :tag AsyncExecution)]
-                              (async
-                               (try
-                                 (impl/record-async-success ~context-binding (!<! ~@body))
-                                 (catch Throwable ~'t
-                                   (impl/record-async-failure ~context-binding ~'t))))))))
+                            (bound-fn [~(vary-meta context-binding assoc :tag ExecutionContext)]
+                              (let [~'result (do ~@body)]
+                                (try
+                                  (impl/on-cancel-propagate! ~context-binding ~'result)
+                                  (!<!! ~'result)
+                                  (catch InterruptedException ~'e
+                                    (async-cancel! ~'result)
+                                    (throw ~'e))))))))
 
 (defn bulkhead
   "A bulkhead allows you to restrict concurrent executions as a way of preventing system overload.
@@ -569,14 +572,14 @@
   - `:on-success-fn` (optional): A function that takes a single ExecutionCompletedEvent argument, called when an execution completes successfully.
   - `:on-failure-fn` (optional): A function that takes a single ExecutionCompletedEvent argument, called when an execution completes with a failure.
   - `:timeout-ms` (required): The timeout duration in milliseconds.
-  - `:interrupt` (optional): Configures the policy to interrupt an execution in addition to cancelling it when the timeout is exceeded. Default is false."
+  - `:interrupt` (optional): Configures the policy to interrupt an execution in addition to cancelling it when the timeout is exceeded. Default is true."
   [{:keys [build
            timeout-ms
            interrupt
            on-success-fn
            on-failure-fn]
     :or {build true
-         interrupt false}}]
+         interrupt true}}]
   (let [builder (cond-> (Timeout/builder (Duration/ofMillis (long timeout-ms)))
                   interrupt
                   (.withInterrupt)

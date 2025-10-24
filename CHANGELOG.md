@@ -1,5 +1,13 @@
 This is a history of changes to k13labs/failsage
 
+# 0.3.0 - 2025-10-23
+
+## Changes
+
+* Fixed a problem due to limitations with AsyncExecution that was preventing the async task from being canceled.
+* Upgrade futurama dependency to 1.4.0 to get latest fixes and improvements.
+* Simplify test matrix, although older Clojure versions should work fine.
+
 # 0.2.0 - 2025-10-22
 
 ### Features

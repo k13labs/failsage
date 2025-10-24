@@ -105,27 +105,6 @@
     (let [pred (impl/->checked-predicate (fn [_] (throw (ex-info "test error" {}))))]
       (is (thrown? Exception (.test pred nil))))))
 
-;; AsyncRunnable Converter Tests
-
-(deftest test-async-runnable-creation
-  (testing "->async-runnable creates a valid AsyncRunnable"
-    (let [called (atom false)
-          runnable (impl/->async-runnable (fn [_] (reset! called true)))]
-      (is (some? runnable))
-      (.run runnable nil)
-      (is @called))))
-
-(deftest test-async-runnable-receives-execution
-  (testing "AsyncRunnable receives execution context"
-    (let [called (atom false)
-          received-arg (atom nil)
-          runnable (impl/->async-runnable (fn [exec]
-                                            (reset! called true)
-                                            (reset! received-arg exec)))]
-      (.run runnable nil)
-      (is @called)
-      (is (nil? @received-arg)))))
-
 ;; Thread Pool Tests
 
 (deftest test-get-pool-with-keyword
@@ -191,27 +170,6 @@
       (is (= "success" result))
       (is (= 2 @counter)))))
 
-;; record-async-success and record-async-failure Tests
-
-(deftest test-record-async-success
-  (testing "record-async-success records result on AsyncExecution"
-    (let [recorded-result (atom nil)
-          mock-execution (reify dev.failsafe.AsyncExecution
-                           (recordResult [_ result]
-                             (reset! recorded-result result)))]
-      (impl/record-async-success mock-execution "success-value")
-      (is (= "success-value" @recorded-result)))))
-
-(deftest test-record-async-failure
-  (testing "record-async-failure records exception on AsyncExecution"
-    (let [recorded-exception (atom nil)
-          mock-execution (reify dev.failsafe.AsyncExecution
-                           (recordException [_ exception]
-                             (reset! recorded-exception exception)))
-          test-error (ex-info "test error" {})]
-      (impl/record-async-failure mock-execution test-error)
-      (is (= test-error @recorded-exception)))))
-
 ;; ContextualSupplier with ExecutionContext Tests
 
 (deftest test-contextual-supplier-receives-context
@@ -267,21 +225,16 @@
   (testing "execute-get-async executes an async function"
     (let [executor (.with (Failsafe/none) ^ExecutorService (f/get-pool :io))
           result (impl/execute-get-async executor
-                                         (fn [ctx]
-                                           (f/async
-                                             (impl/record-async-success ctx 42))))]
+                                         (fn [_]
+                                           42))]
       (is (= 42 @result)))))
 
 (deftest test-execute-get-async-with-exception
   (testing "execute-get-async handles exceptions"
     (let [executor (.with (Failsafe/none) ^ExecutorService (f/get-pool :io))
           result (impl/execute-get-async executor
-                                         (fn [ctx]
-                                           (f/async
-                                             (try
-                                               (throw (ex-info "async error" {}))
-                                               (catch Throwable t
-                                                 (impl/record-async-failure ctx t))))))]
+                                         (fn [_]
+                                           (throw (ex-info "async error" {}))))]
       (is (thrown-with-msg? Exception #"async error"
                             @result)))))
 
@@ -292,8 +245,7 @@
           result (impl/execute-get-async executor
                                          (fn [ctx]
                                            (reset! received-context ctx)
-                                           (f/async
-                                             (impl/record-async-success ctx 42))))]
+                                           42))]
       (is (= 42 @result))
       (is (some? @received-context))
-      (is (instance? dev.failsafe.AsyncExecution @received-context)))))
+      (is (instance? ExecutionContext @received-context)))))

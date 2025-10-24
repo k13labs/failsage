@@ -18,7 +18,8 @@
     Timeout
     TimeoutExceededException]
    [java.lang ArithmeticException IllegalArgumentException]
-   [java.time Duration]))
+   [java.time Duration]
+   [java.util.concurrent ExecutionException]))
 
 ;; Dynamic var for testing
 (def ^:dynamic *test-var* nil)
@@ -468,11 +469,34 @@
       (is (instance? Timeout policy)))))
 
 (deftest test-timeout-enforces-limit
-  (testing "timeout enforces time limit"
+  (testing "timeout enforces time limit - execute"
     (let [policy (fs/timeout {:timeout-ms 100})
-          executor (fs/executor policy)]
-      (is (thrown? TimeoutExceededException
-                   (fs/execute executor (Thread/sleep 200)))))))
+          executor (fs/executor policy)
+          start-time (System/currentTimeMillis)
+          result (try
+                   (fs/execute executor
+                     (do
+                       (Thread/sleep 10000)
+                       ::done)) ;;; is interrupted by timeout
+                   (catch TimeoutExceededException e
+                     e))
+          end-time (System/currentTimeMillis)]
+      (is (instance? TimeoutExceededException result))
+      (is (< (- end-time start-time) 1000)))) ;;; should timeout before 200ms sleep completes
+  (testing "timeout enforces time limit - execute-async"
+    (let [policy (fs/timeout {:timeout-ms 100})
+          executor (fs/executor policy)
+          start-time (System/currentTimeMillis)
+          result (try
+                   @(fs/execute-async executor
+                      (future
+                        (Thread/sleep 10000)
+                        ::done))
+                   (catch ExecutionException e
+                     (.getCause e)))
+          end-time (System/currentTimeMillis)]
+      (is (instance? TimeoutExceededException result))
+      (is (< (- end-time start-time) 1000))))) ;;; should timeout before 200ms sleep completes
 
 (deftest test-timeout-success-callback
   (testing "timeout calls on-success-fn"

@@ -1,5 +1,9 @@
 This is a history of changes to k13labs/failsage
 
+# 0.3.1 - 2025-10-28
+
+* Bump futurama dependency to 1.4.1 to include latest fixes.
+
 # 0.3.0 - 2025-10-23
 
 ## Changes

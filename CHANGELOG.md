@@ -1,4 +1,4 @@
-This is a history of changes to k13labs/failsage
+This is a history of changes to gateless/failsage
 
 # 0.3.1 - 2025-10-28
 

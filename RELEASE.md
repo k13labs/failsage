@@ -12,7 +12,7 @@ Releasing the project requires these steps:
 6. Update the `pom.xml` in `main` to a new minor version, commit the changes.
 
 [clojars]: https://clojars.org
-[release-site]: https://clojars.org/com.github.k13labs/failsage
-[project-url]: https://github.com/k13labs/failsage/
+[release-site]: https://clojars.org/com.github.gateless/failsage
+[project-url]: https://github.com/gateless/failsage/
 [semantic-versioning]: http://semver.org/
 [github-release-url]: https://help.github.com/articles/creating-releases/

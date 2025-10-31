@@ -1,4 +1,4 @@
-[![Build Status](https://github.com/k13labs/failsage/actions/workflows/clojure.yml/badge.svg)](https://github.com/k13labs/failsage/actions/workflows/clojure.yml)
+[![Build Status](https://github.com/gateless/failsage/actions/workflows/clojure.yml/badge.svg)](https://github.com/gateless/failsage/actions/workflows/clojure.yml)
 
 # _About_
 
@@ -6,7 +6,7 @@ Failsage is a Clojure library that provides an idiomatic translation layer for [
 
 ## Rationale
 
-Failsage is designed for simplicity and ergonomics. You can pass policies directly to execute functions without creating executors, use optional context bindings only when you need execution state, and compose multiple policies through simple vectors. Rather than hiding context in dynamic variables or nesting macros, failsage makes state explicit and easy to test. It provides first-class async integration with [futurama](https://github.com/k13labs/futurama) using the same straightforward API. The result is a library where simple cases require minimal code and complex scenarios remain clear and composable.
+Failsage is designed for simplicity and ergonomics. You can pass policies directly to execute functions without creating executors, use optional context bindings only when you need execution state, and compose multiple policies through simple vectors. Rather than hiding context in dynamic variables or nesting macros, failsage makes state explicit and easy to test. It provides first-class async integration with [futurama](https://github.com/gateless/futurama) using the same straightforward API. The result is a library where simple cases require minimal code and complex scenarios remain clear and composable.
 
 Note: You can also use Failsafe directly via Java interop or through alternatives like [diehard](https://github.com/sunng87/diehard).
 
@@ -15,7 +15,7 @@ Note: You can also use Failsafe directly via Java interop or through alternative
 Rather than reinventing the resilience patterns, Failsage wisely wraps Failsafe with:
 
 - **Idiomatic Clojure API**: Keyword arguments, immutable data structures, and functional style
-- **Async Support**: Seamless async execution integration via [futurama](https://github.com/k13labs/futurama), including channels/futures/promises/deferreds.
+- **Async Support**: Seamless async execution integration via [futurama](https://github.com/gateless/futurama), including channels/futures/promises/deferreds.
 - **Unified Interface**: Consistent API for both synchronous and asynchronous code paths
 - **Data-Driven Policies**: Define policies as plain Clojure maps for configuration-driven setups
 
@@ -316,7 +316,7 @@ Policies can be composed together. They are applied in order from innermost to o
 
 ## Asynchronous Execution
 
-Failsage integrates with [futurama](https://github.com/k13labs/futurama) for async execution:
+Failsage integrates with [futurama](https://github.com/gateless/futurama) for async execution:
 
 ```clj
 (require '[failsage.core :as fs])
@@ -428,11 +428,11 @@ GNU Make is used to simplify invocation of some commands.
 
 failsage releases for this project are on [Clojars](https://clojars.org/). Simply add the following to your project:
 
-[![Clojars Project](https://clojars.org/com.github.k13labs/failsage/latest-version.svg)](http://clojars.org/com.github.k13labs/failsage)
+[![Clojars Project](https://clojars.org/com.github.gateless/failsage/latest-version.svg)](http://clojars.org/com.github.gateless/failsage)
 
 # _Communication_
 
-- For any other questions or issues about failsage free to browse or open a [Github Issue](https://github.com/k13labs/failsage/issues).
+- For any other questions or issues about failsage free to browse or open a [Github Issue](https://github.com/gateless/failsage/issues).
 
 # Contributing
 
@@ -440,7 +440,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md)
 
 # LICENSE
 
-Copyright 2025 Jose Gomez
+Copyright 2025 Gateless
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at
 
